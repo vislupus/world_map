@@ -2,13 +2,24 @@ window.addEventListener('resize', resize)
 resize();
 
 function resize() {
-    let screenHeight = window.innerHeight;
     let screenWidth = window.innerWidth;
-    let newSize = (screenHeight * 1.77777).toFixed(0);
+    let screenHeight = window.innerHeight;
+    //console.log(screenWidth, screenHeight)
 
-    if (newSize > screenWidth) {
-        document.getElementById('wrap').style.width = screenWidth - 15 + "px";
+    let el = document.querySelector('#wrap');
+    el.style.transform = `scale(1) translateY(0%)`;
+
+    let elementHeight = el.getBoundingClientRect().height;
+    let elementWidth = el.getBoundingClientRect().width;
+    //console.log(elementWidth, elementHeight)
+
+    let scaleWidth = screenWidth / elementWidth;
+    let scaleHeight = screenHeight / elementHeight;
+    //console.log(scaleWidth, scaleHeight)
+
+    if (scaleWidth < scaleHeight) {
+        el.style.transform = `scale(${scaleWidth}) translateY(0%)`;
     } else {
-        document.getElementById('wrap').style.width = newSize - 10 + "px";
+        el.style.transform = `scale(${scaleHeight}) translateY(0%)`;
     }
 }

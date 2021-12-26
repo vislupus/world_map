@@ -1,2 +1,2 @@
-# world_map
-Map of the countries which I've visited already.
+# Map of the World
+Map of the countries which I've visited through the years.
