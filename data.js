@@ -25,4 +25,7 @@ var data = [{
 }, {
     countries: ["Switzerland"],
     year: 2022
+}, {
+    countries: ["Turkey"],
+    year: 2023
 }];
