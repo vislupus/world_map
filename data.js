@@ -29,6 +29,6 @@ var data = [{
     countries: ["Turkey", "Spain", "Portugal"],
     year: 2023
 }, {
-    countries: ["Malta"],
+    countries: ["Malta", "Hungary"],
     year: 2024
 }];
