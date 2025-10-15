@@ -26,12 +26,13 @@ var data = [{
     countries: ["Switzerland"],
     year: 2022
 }, {
-    countries: ["Turkey", "Spain", "Portugal"],
+    countries: ["Turkey", "Portugal"],
     year: 2023
 }, {
     countries: ["Malta", "Hungary"],
     year: 2024
 }, {
-    countries: ["Thailand"],
+    countries: ["Thailand", "Poland"],
     year: 2025
 }];
+
