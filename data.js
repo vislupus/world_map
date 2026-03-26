@@ -35,7 +35,7 @@ var data = [{
     countries: ["Thailand", "Poland"],
     year: 2025
 }, {
-    countries: ["Marocco", "China"],
+    countries: ["Morocco", "China"],
     year: 2026
 }];
 
