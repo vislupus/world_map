@@ -1,0 +1,63 @@
+# ──────────────────────────────────────
+#  My Travel Map — Visited Countries
+#  Add a new year + countries and reload
+# ──────────────────────────────────────
+
+- year: 2014
+  countries:
+    - Bulgaria
+
+- year: 2015
+  countries:
+    - Germany
+    - Greece
+
+- year: 2016
+  countries:
+    - Serbia
+
+- year: 2017
+  countries:
+    - Italy
+
+- year: 2018
+  countries:
+    - Romania
+
+- year: 2019
+  countries:
+    - Montenegro
+    - Croatia
+    - Austria
+    - North_Macedonia
+
+- year: 2020
+  countries: []
+
+- year: 2021
+  countries:
+    - Slovenia
+
+- year: 2022
+  countries:
+    - Switzerland
+
+- year: 2023
+  countries:
+    - Turkey
+    - Portugal
+
+- year: 2024
+  countries:
+    - Malta
+    - Hungary
+
+- year: 2025
+  countries:
+    - Thailand
+    - Poland
+
+- year: 2026
+  countries:
+    - Morocco
+    - China

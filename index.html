@@ -1,61 +1,571 @@
-<!DOCTYPE HTML>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="bg">
 
 <head>
-    <script language="javascript" type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/snap.svg/0.5.1/snap.svg.js"></script>
-    <meta name=”description” content="Map of the countries which I've visited already.">
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <title>My Travel Map</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
             height: 100vh;
             width: 100vw;
-            padding: 0;
-            margin: 0;
-            outline: 0 !important;
             overflow: hidden;
+            background: #1a0e04;
+            font-family: 'Roboto', sans-serif;
             -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
             user-select: none;
         }
 
-        #container {
-            height: 100vh;
-            width: 100vw;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        #wrap {
+        #map-svg {
             position: fixed;
-            height: 480px;
-            width: 848px;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            filter: sepia(0.10) saturate(1.04) contrast(1.02);
         }
 
-        #slider_thumb {
-            cursor: pointer;
+        #vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 5;
+            background: radial-gradient(ellipse at center,
+                    transparent 45%, rgba(40, 22, 6, 0.12) 65%, rgba(20, 10, 2, 0.30) 100%);
         }
 
+        #grain {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 6;
+            opacity: 0.045;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            background-size: 180px 180px;
+        }
+
+        /* Tooltip stays as HTML overlay — it follows the mouse */
+        #tooltip {
+            position: fixed;
+            pointer-events: none;
+            background: linear-gradient(135deg, rgba(242, 228, 200, 0.95), rgba(225, 206, 170, 0.92));
+            border: 1.5px solid rgba(107, 58, 31, 0.45);
+            border-radius: 14px;
+            padding: 12px 20px;
+            font-family: 'Roboto', sans-serif;
+            font-size: 16px;
+            color: #3a1e0a;
+            opacity: 0;
+            transition: opacity 0.18s ease;
+            z-index: 1000;
+            box-shadow: 0 6px 20px rgba(40, 18, 4, 0.35), 0 1px 0 rgba(255, 245, 225, 0.3) inset;
+        }
+
+        #tooltip .label {
+            font-weight: 300;
+            opacity: 0.6;
+        }
+
+        #tooltip .value {
+            font-weight: 700;
+            margin-left: 4px;
+            font-size: 17px;
+        }
+
+        #tooltip .year-info {
+            font-size: 12px;
+            opacity: 0.45;
+            margin-top: 4px;
+            font-weight: 400;
+        }
     </style>
-
 </head>
 
 <body>
-    <div id="container">
-        <div id="wrap">
-            <svg id="svg"></svg>
-        </div>
+
+    <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="vignette"></div>
+    <div id="grain"></div>
+
+    <div id="tooltip">
+        <span class="label">Country:</span>
+        <span class="value" id="tooltip-name"></span>
+        <div class="year-info" id="tooltip-year"></div>
     </div>
 
-    <script language="javascript" type="text/javascript" src="plugins.js"></script>
-    <script language="javascript" type="text/javascript" src="window.js"></script>
-    <script language="javascript" type="text/javascript" src="data.js"></script>
-    <script language="javascript" type="text/javascript" src="app.js"></script>
+    <script>
+        // ─── DATA ───
+        let data = [];
+        let MIN_YEAR = 2014, MAX_YEAR = 2014;
+        const COLOR_VISITED = "#b8875a", COLOR_DEFAULT = "#ffeccf", COLOR_HOVER = "#8b5a34";
+        let currentYear = MIN_YEAR, isPlaying = false, playInterval = null, playSpeed = 1;
+        const speeds = [1, 1.5, 2, 3]; let speedIndex = 0;
+
+        const countryYearMap = {};
+        let allCountries = [];
+        function rebuildDataMaps() {
+            Object.keys(countryYearMap).forEach(k => delete countryYearMap[k]);
+            data.forEach(d => d.countries.forEach(c => { if (!countryYearMap[c]) countryYearMap[c] = d.year; }));
+            allCountries = data.flatMap(d => d.countries);
+        }
+        function getVisited(y) { const v = []; for (const d of data) { if (d.year > y) break; v.push(...d.countries); } return v; }
+        function getNewForYear(y) { const d = data.find(x => x.year === y); return d ? d.countries : []; }
+
+        const F = { x: 63.91, y: 65.529, w: 3539.849, h: 1955.443 };
+        const SVG_W = 3667.665, SVG_H = 2078.343;
+        const svgEl = document.getElementById('map-svg');
+        svgEl.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
+
+        let mapGroup = null, zoomLevel = 1, panX = 0, panY = 0;
+
+        function updateTx() {
+            if (!mapGroup) return;
+            mapGroup.setAttribute('transform', `translate(${panX},${panY}) scale(${zoomLevel})`);
+        }
+        function zoomAt(dir, cx, cy) {
+            const f = dir > 0 ? 1.3 : 1 / 1.3;
+            const nz = Math.max(1, Math.min(8, zoomLevel * f));
+            const r = nz / zoomLevel;
+            panX = cx - r * (cx - panX); panY = cy - r * (cy - panY);
+            zoomLevel = nz; clampPan(); updateTx();
+        }
+        function clampPan() {
+            if (zoomLevel <= 1) { panX = 0; panY = 0; return; }
+            const mx = F.w * (zoomLevel - 1) * 0.6, my = F.h * (zoomLevel - 1) * 0.6;
+            panX = Math.max(-mx, Math.min(mx, panX));
+            panY = Math.max(-my, Math.min(my, panY));
+        }
+        function resetView() { zoomLevel = 1; panX = 0; panY = 0; updateTx(); }
+
+        function toSVG(cx, cy) {
+            const pt = svgEl.createSVGPoint(); pt.x = cx; pt.y = cy;
+            return pt.matrixTransform(svgEl.getScreenCTM().inverse());
+        }
+
+        // ─── Pan & Zoom ───
+        let isPan = false, psX = 0, psY = 0, psPX = 0, psPY = 0;
+
+        svgEl.addEventListener('wheel', e => {
+            e.preventDefault();
+            const p = toSVG(e.clientX, e.clientY);
+            zoomAt(e.deltaY < 0 ? 1 : -1, p.x, p.y);
+        }, { passive: false });
+
+        svgEl.addEventListener('mousedown', e => {
+            if (e.target.closest('#countries')) return;
+            // Don't pan if clicking UI inside foreignObject
+            if (e.target.closest('foreignObject')) return;
+            isPan = true;
+            const p = toSVG(e.clientX, e.clientY);
+            psX = p.x; psY = p.y; psPX = panX; psPY = panY;
+            svgEl.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mousemove', e => {
+            if (!isPan) return;
+            const p = toSVG(e.clientX, e.clientY);
+            panX = psPX + (p.x - psX); panY = psPY + (p.y - psY);
+            clampPan(); updateTx();
+        });
+        window.addEventListener('mouseup', () => { isPan = false; svgEl.style.cursor = ''; });
+
+        let lastD = 0;
+        svgEl.addEventListener('touchstart', e => {
+            if (e.target.closest('foreignObject')) return;
+            if (e.touches.length === 1) {
+                isPan = true;
+                const p = toSVG(e.touches[0].clientX, e.touches[0].clientY);
+                psX = p.x; psY = p.y; psPX = panX; psPY = panY;
+            } else if (e.touches.length === 2) {
+                isPan = false;
+                lastD = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY);
+            }
+        }, { passive: true });
+        svgEl.addEventListener('touchmove', e => {
+            if (e.target.closest('foreignObject')) return;
+            e.preventDefault();
+            if (e.touches.length === 1 && isPan) {
+                const p = toSVG(e.touches[0].clientX, e.touches[0].clientY);
+                panX = psPX + (p.x - psX); panY = psPY + (p.y - psY);
+                clampPan(); updateTx();
+            } else if (e.touches.length === 2) {
+                const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY);
+                const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const p = toSVG(cx, cy);
+                zoomAt(d > lastD ? 1 : -1, p.x, p.y); lastD = d;
+            }
+        }, { passive: false });
+        svgEl.addEventListener('touchend', () => { isPan = false; lastD = 0; });
+
+        const fc = () => ({ x: F.x + F.w / 2, y: F.y + F.h / 2 });
+
+        // ─── Tooltip ───
+        const tooltip = document.getElementById('tooltip');
+        const ttName = document.getElementById('tooltip-name');
+        const ttYear = document.getElementById('tooltip-year');
+        let hovered = null;
+        function showTT(e, el) {
+            ttName.textContent = el.id.replaceAll('_', ' ');
+            const vy = countryYearMap[el.id];
+            if (vy && vy <= currentYear) { ttYear.textContent = 'Visited in ' + vy; ttYear.style.display = 'block'; }
+            else ttYear.style.display = 'none';
+            tooltip.style.opacity = '1'; moveTT(e);
+        }
+        function moveTT(e) {
+            const tw = tooltip.offsetWidth;
+            tooltip.style.left = (e.clientX + tw + 24 > window.innerWidth ? e.clientX - tw - 18 : e.clientX + 18) + 'px';
+            tooltip.style.top = (e.clientY - 14) + 'px';
+        }
+        function hideTT() { tooltip.style.opacity = '0'; }
+
+        // ─── Map colors ───
+        function updateColors(y) {
+            const vis = getVisited(y);
+            allCountries.forEach(c => { const el = document.getElementById(c); if (el) el.setAttribute('fill', COLOR_DEFAULT); });
+            vis.forEach(c => { const el = document.getElementById(c); if (el) el.setAttribute('fill', COLOR_VISITED); });
+            if (hovered) hovered.setAttribute('fill', COLOR_HOVER);
+            const countEl = document.getElementById('country-count');
+            if (countEl) countEl.textContent = vis.length;
+        }
+
+        // ─── New countries tags ───
+        let tagTimeout = null;
+        function showNewCountries(countries) {
+            const container = document.getElementById('new-countries');
+            if (!container) return;
+            container.innerHTML = '';
+            if (tagTimeout) clearTimeout(tagTimeout);
+            if (!countries.length) return;
+            countries.forEach((c, i) => {
+                const tag = document.createElement('span');
+                tag.style.cssText = `
+            display:inline-block; background:linear-gradient(135deg,rgba(139,90,52,0.85),rgba(107,58,31,0.9));
+            color:#f8eed8; font:500 28px/1 Roboto,sans-serif; padding:12px 32px; border-radius:40px;
+            margin:0 8px; box-shadow:0 6px 20px rgba(40,18,4,0.3); letter-spacing:1px;
+            opacity:0; transform:scale(0.7) translateY(16px);
+            animation:tagPop 0.35s cubic-bezier(0.34,1.56,0.64,1) ${i * 0.08}s forwards;
+        `;
+                tag.textContent = c.replaceAll('_', ' ');
+                container.appendChild(tag);
+            });
+            tagTimeout = setTimeout(() => {
+                container.style.opacity = '0';
+                container.style.transition = 'opacity 0.35s';
+                setTimeout(() => { container.innerHTML = ''; container.style.opacity = '1'; container.style.transition = ''; }, 400);
+            }, 2500);
+        }
+
+        // ─── Slider & year ───
+        let dragS = false;
+        function setYear(y) {
+            y = Math.max(MIN_YEAR, Math.min(MAX_YEAR, Math.round(y)));
+            const changed = y !== currentYear;
+            currentYear = y;
+            const yDisp = document.getElementById('year-display');
+            if (yDisp) yDisp.textContent = y;
+            const p = (y - MIN_YEAR) / (MAX_YEAR - MIN_YEAR) * 100;
+            const sFill = document.getElementById('slider-fill');
+            const sThumb = document.getElementById('slider-thumb');
+            if (sFill) sFill.style.width = p + '%';
+            if (sThumb) sThumb.style.left = p + '%';
+            updateColors(y);
+            if (changed) showNewCountries(getNewForYear(y));
+        }
+        function yearX(cx) {
+            const r = document.getElementById('slider-track');
+            if (!r) return MIN_YEAR;
+            const rect = r.getBoundingClientRect();
+            return Math.round(Math.max(0, Math.min(1, (cx - rect.left) / rect.width)) * (MAX_YEAR - MIN_YEAR) + MIN_YEAR);
+        }
+
+        // ─── Play ───
+        function startPlay() {
+            if (currentYear >= MAX_YEAR) setYear(MIN_YEAR);
+            isPlaying = true;
+            const pi = document.getElementById('play-icon');
+            const pa = document.getElementById('pause-icon');
+            if (pi) pi.style.display = 'none';
+            if (pa) pa.style.display = 'block';
+            playInterval = setInterval(() => {
+                if (currentYear >= MAX_YEAR) { stopPlay(); return; }
+                setYear(currentYear + 1);
+            }, 1200 / playSpeed);
+        }
+        function stopPlay() {
+            isPlaying = false;
+            const pi = document.getElementById('play-icon');
+            const pa = document.getElementById('pause-icon');
+            if (pi) pi.style.display = 'block';
+            if (pa) pa.style.display = 'none';
+            if (playInterval) { clearInterval(playInterval); playInterval = null; }
+        }
+
+        // ─── Keyboard ───
+        window.addEventListener('keydown', e => {
+            if (e.code === 'Space') { e.preventDefault(); isPlaying ? stopPlay() : startPlay(); }
+            if (e.code === 'ArrowRight') { stopPlay(); setYear(currentYear + 1); }
+            if (e.code === 'ArrowLeft') { stopPlay(); setYear(currentYear - 1); }
+            const c = fc();
+            if (e.code === 'Equal' || e.code === 'NumpadAdd') zoomAt(1, c.x, c.y);
+            if (e.code === 'Minus' || e.code === 'NumpadSubtract') zoomAt(-1, c.x, c.y);
+            if (e.code === 'Digit0' || e.code === 'Numpad0') resetView();
+        });
+
+        // ─── Build all UI as foreignObject elements inside the SVG ───
+        function buildUI() {
+            const ns = 'http://www.w3.org/2000/svg';
+
+            // Helper: create a foreignObject at fixed SVG coords
+            function fo(x, y, w, h, html) {
+                const f = document.createElementNS(ns, 'foreignObject');
+                f.setAttribute('x', x); f.setAttribute('y', y);
+                f.setAttribute('width', w); f.setAttribute('height', h);
+                const div = document.createElement('div');
+                div.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+                div.innerHTML = html;
+                f.appendChild(div);
+                return f;
+            }
+
+            const cardBg = 'background:linear-gradient(135deg,rgba(242,228,200,0.92),rgba(225,206,170,0.88));border:3px solid rgba(107,58,31,0.5);box-shadow:0 6px 18px rgba(30,12,2,0.16),0 1px 0 rgba(255,245,225,0.22) inset;';
+
+            // ── Stats (top-left inside frame) ──
+            const statsHTML = `
+        <div style="${cardBg} border-radius:40px; padding:30px 44px; display:inline-block;">
+            <div id="country-count" style="font:900 90px/1 Roboto,sans-serif; color:#3a1e0a; text-shadow:0 2px 0 rgba(255,240,210,0.5);text-align: center;}">1</div>
+            <div style="font:700 24px/1 Roboto,sans-serif; color:#7a5a36; text-transform:uppercase; letter-spacing:5px; margin-top:6px;">countries</div>
+        </div>
+    `;
+            svgEl.appendChild(fo(100, 100, 400, 220, statsHTML));
+
+            // ── Zoom buttons (top-right inside frame) ──
+            const btnStyle = `${cardBg} border-radius:30px; width:90px; height:90px; display:flex; align-items:center; justify-content:center; cursor:pointer; font:700 44px Roboto,sans-serif; color:#3a1e0a; margin-bottom:10px; transition:all 0.15s;`;
+            const zoomHTML = `
+    <style>
+        .zoom-wrap{
+            width:100%;
+            height:100%;
+            display:flex;
+            justify-content:center;
+            align-items:flex-start;
+            padding:10px;
+        }
+
+        .zoom-col{
+            display:flex;
+            flex-direction:column;
+            gap:12px;
+            align-items:center;
+        }
+
+        .zoom-btn{
+            ${cardBg}
+            border-radius:30px;
+            width:90px;
+            height:90px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            font:700 44px Roboto,sans-serif;
+            color:#3a1e0a;
+            transition:background 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .zoom-btn:hover{
+            background:linear-gradient(145deg,#7d4526,#5a2f16);
+            color:#f2e4c8;
+            transform:translateY(-1px);
+            box-shadow:0 6px 18px rgba(30,12,2,0.18), 0 1px 0 rgba(255,245,225,0.18) inset;
+        }
+
+        .zoom-btn.reset{
+            font-size:42px;
+        }
+    </style>
+
+    <div class="zoom-wrap">
+        <div class="zoom-col">
+            <div id="zoom-in-btn" class="zoom-btn">+</div>
+            <div id="zoom-out-btn" class="zoom-btn">−</div>
+            <div id="zoom-reset-btn" class="zoom-btn reset">⟲</div>
+        </div>
+    </div>
+`;
+            svgEl.appendChild(fo(3400, 250, 220, 420, zoomHTML));
+
+            // ── Controls bar (bottom-center inside frame) ──
+            const controlsHTML = `
+    <style>
+        @keyframes tagPop { to { opacity:1; transform:scale(1) translateY(0); } }
+        #slider-track { position:relative; width:580px; height:18px; background:linear-gradient(to right,#c9ad82,#b89868); border-radius:18px; cursor:pointer; box-shadow:0 2px 6px rgba(60,30,10,0.2) inset; }
+        #slider-fill { position:absolute; top:0; left:0; height:100%; background:linear-gradient(to right,#8b5a34,#6b3a1f); border-radius:18px; pointer-events:none; transition:width 0.12s ease; }
+        #slider-thumb { position:absolute; top:50%; width:44px; height:44px; background:linear-gradient(145deg,#7d4526,#5a2f16); border:5px solid #f2e4c8; border-radius:50%; transform:translate(-50%,-50%); cursor:grab; box-shadow:0 4px 16px rgba(40,18,4,0.45); }
+        #slider-thumb:hover { transform:translate(-50%,-50%) scale(1.15); }
+        #slider-thumb:active { cursor:grabbing; }
+    </style>
+
+    <div style="width:100%; display:flex; flex-direction:column; align-items:center; margin-left:50px;">
+        <div id="new-countries" style="text-align:center; margin-bottom:20px; height:90px; overflow:hidden;"></div>
+
+        <div style="${cardBg} border-radius:50px; padding:24px 50px; display:inline-flex; align-items:center; gap:30px;">
+            <div id="play-btn-fo" style="width:90px;height:90px;border-radius:50%;border:none;background:linear-gradient(145deg,#7d4526,#5a2f16);color:#f2e4c8;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 6px 20px rgba(90,47,22,0.5),0 2px 0 rgba(180,130,80,0.3) inset;flex-shrink:0;transition:all 0.2s;">
+                <svg id="play-icon" viewBox="0 0 24 24" style="width:36px;height:36px;fill:currentColor"><polygon points="7,3 21,12 7,21"/></svg>
+                <svg id="pause-icon" viewBox="0 0 24 24" style="width:36px;height:36px;fill:currentColor;display:none"><rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/></svg>
+            </div>
+            <div id="year-display" style="font:900 64px/1 Roboto,sans-serif; color:#3a1e0a; min-width:120px; text-align:center; text-shadow:0 2px 0 rgba(255,240,210,0.5);">${MIN_YEAR}</div>
+            <div id="slider-track">
+                <div id="slider-fill"></div>
+                <div id="slider-thumb"></div>
+            </div>
+            <div id="speed-btn-fo" style="font:700 28px Roboto,sans-serif; color:#6b3a1f; background:rgba(107,58,31,0.06); border:3px solid rgba(107,58,31,0.3); border-radius:26px; padding:12px 26px; cursor:pointer; transition:all 0.2s;">1×</div>
+        </div>
+    </div>
+`;
+            // Center: frame center x = F.x + F.w/2 = ~1834. Width ~1200. So x = 1834 - 600 = 1234
+            svgEl.appendChild(fo(1000, 1680, 1700, 460, controlsHTML));
+
+            // Wire up events after DOM is ready
+            requestAnimationFrame(() => {
+                document.getElementById('zoom-in-btn')?.addEventListener('click', () => { const c = fc(); zoomAt(1, c.x, c.y); });
+                document.getElementById('zoom-out-btn')?.addEventListener('click', () => { const c = fc(); zoomAt(-1, c.x, c.y); });
+                document.getElementById('zoom-reset-btn')?.addEventListener('click', resetView);
+                document.getElementById('play-btn-fo')?.addEventListener('click', () => isPlaying ? stopPlay() : startPlay());
+                document.getElementById('speed-btn-fo')?.addEventListener('click', () => {
+                    speedIndex = (speedIndex + 1) % speeds.length;
+                    playSpeed = speeds[speedIndex];
+                    document.getElementById('speed-btn-fo').textContent = playSpeed + '×';
+                    if (isPlaying) { stopPlay(); startPlay(); }
+                });
+
+                const sTrack = document.getElementById('slider-track');
+                const sThumb = document.getElementById('slider-thumb');
+                if (sTrack) {
+                    sTrack.addEventListener('mousedown', e => { dragS = true; setYear(yearX(e.clientX)); });
+                    sTrack.addEventListener('touchstart', e => { dragS = true; setYear(yearX(e.touches[0].clientX)); }, { passive: true });
+                }
+                if (sThumb) {
+                    sThumb.addEventListener('mousedown', e => { e.stopPropagation(); dragS = true; });
+                    sThumb.addEventListener('touchstart', e => { e.stopPropagation(); dragS = true; }, { passive: true });
+                }
+                window.addEventListener('mousemove', e => { if (dragS) setYear(yearX(e.clientX)); });
+                window.addEventListener('mouseup', () => { dragS = false; });
+                window.addEventListener('touchmove', e => { if (dragS) setYear(yearX(e.touches[0].clientX)); }, { passive: true });
+                window.addEventListener('touchend', () => { dragS = false; });
+            });
+        }
+
+        // ─── Load YAML + SVG ───
+        (async function init() {
+            try {
+                const yamlText = await fetch('travels.yaml').then(r => r.text());
+                data = jsyaml.load(yamlText);
+                data.forEach(d => { if (!d.countries) d.countries = []; });
+                data.sort((a, b) => a.year - b.year);
+                MIN_YEAR = data[0].year;
+                MAX_YEAR = data[data.length - 1].year;
+                currentYear = MIN_YEAR;
+                rebuildDataMaps();
+            } catch (err) {
+                console.error('Failed to load travels.yaml:', err);
+                return;
+            }
+
+            const txt = await fetch('shutterstock_723379432_mod.svg').then(r => r.text());
+            const doc = new DOMParser().parseFromString(txt, 'image/svg+xml');
+            const srcSvg = doc.documentElement;
+
+            // ClipPath
+            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            const cp = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+            cp.setAttribute('id', 'frame-clip');
+            const cr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            cr.setAttribute('x', F.x); cr.setAttribute('y', F.y);
+            cr.setAttribute('width', F.w); cr.setAttribute('height', F.h);
+            cp.appendChild(cr); defs.appendChild(cp);
+            svgEl.appendChild(defs);
+
+            // Frame — static
+            const neGroup = srcSvg.querySelector('#NE');
+            if (neGroup) svgEl.appendChild(neGroup.cloneNode(true));
+
+            // Map — clipped & zoomable
+            mapGroup = srcSvg.querySelector('#map_with_countries');
+            if (mapGroup) {
+                const clipW = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                clipW.setAttribute('clip-path', 'url(#frame-clip)');
+                clipW.appendChild(mapGroup.cloneNode(true));
+                svgEl.appendChild(clipW);
+                mapGroup = clipW.querySelector('#map_with_countries');
+            }
+
+            // Compass rose — static
+            const compass = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            compass.setAttribute('transform', 'translate(3280, 1740) scale(1.4)');
+            compass.setAttribute('opacity', '0.15');
+            compass.innerHTML = `
+        <circle cx="50" cy="50" r="46" fill="none" stroke="#6b3a1f" stroke-width="1.8"/>
+        <circle cx="50" cy="50" r="38" fill="none" stroke="#6b3a1f" stroke-width="0.6"/>
+        <line x1="50" y1="12" x2="50" y2="88" stroke="#6b3a1f" stroke-width="0.4"/>
+        <line x1="12" y1="50" x2="88" y2="50" stroke="#6b3a1f" stroke-width="0.4"/>
+        <polygon points="50,6 55,44 50,38 45,44" fill="#6b3a1f"/>
+        <polygon points="50,94 55,56 50,62 45,56" fill="#9c7a4e"/>
+        <polygon points="6,50 44,45 38,50 44,55" fill="#9c7a4e"/>
+        <polygon points="94,50 56,45 62,50 56,55" fill="#9c7a4e"/>
+        <text x="50" y="5" text-anchor="middle" font-size="8" font-family="Roboto" font-weight="900" fill="#6b3a1f">N</text>
+        <text x="50" y="99" text-anchor="middle" font-size="7" font-family="Roboto" font-weight="500" fill="#9c7a4e">S</text>
+        <text x="2" y="53" text-anchor="middle" font-size="7" font-family="Roboto" font-weight="500" fill="#9c7a4e">W</text>
+        <text x="98" y="53" text-anchor="middle" font-size="7" font-family="Roboto" font-weight="500" fill="#9c7a4e">E</text>
+    `;
+            svgEl.appendChild(compass);
+
+            // Build all UI as foreignObjects inside SVG
+            buildUI();
+
+            setYear(MIN_YEAR);
+
+            // Hover
+            const countries = svgEl.querySelector('#countries');
+            if (countries) {
+                countries.addEventListener('mouseover', e => {
+                    const p = e.target.closest('path[id]');
+                    if (!p || p === hovered) return;
+                    if (hovered) {
+                        const v = getVisited(currentYear);
+                        hovered.setAttribute('fill', v.includes(hovered.id) ? COLOR_VISITED : COLOR_DEFAULT);
+                    }
+                    hovered = p; p.setAttribute('fill', COLOR_HOVER); showTT(e, p);
+                });
+                countries.addEventListener('mousemove', e => { if (hovered) moveTT(e); });
+                countries.addEventListener('mouseout', e => {
+                    const p = e.target.closest('path[id]');
+                    if (!p) return;
+                    if (hovered === p) {
+                        const v = getVisited(currentYear);
+                        p.setAttribute('fill', v.includes(p.id) ? COLOR_VISITED : COLOR_DEFAULT);
+                        hovered = null;
+                    }
+                    hideTT();
+                });
+            }
+        })();
+    </script>
 </body>
 
 </html>
